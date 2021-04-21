@@ -1,0 +1,154 @@
+$StopWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# Grab the year needed for Archiving
+$YearInput = 0
+do {
+    $YearInputValid = [int]::TryParse((Read-Host 'Please enter year you wish to archive in (YYYY) format'), [ref]$YearInput)
+    $YearInputSize = ([string]$YearInput).length
+    if (-not $YearInputValid)
+
+    {
+        Write-Host -BackgroundColor Red -ForegroundColor White "Input not a number"
+    }
+    elseif ($YearInputSize -ne 4)
+    {
+        Write-Host -BackgroundColor Red -ForegroundColor White "Input is not 4 digits"
+    }
+} while ((-not $YearInputValid) -or ($YearInputSize -ne 4))
+
+Write-Host "Your valid input is:" $YearInput
+
+$Year = Read-Host "Is "  $YearInput  " the correct year?"
+
+if ($Year -ceq "yes")
+{
+    $Year = $YearInput
+    Write-Host " The year " $Year " will be now checked for archiving."
+}
+
+if ($Year -ieq "no") 
+{
+    do 
+    {
+        $ArchiveYear = 0
+        do {
+            $YearInputValid = [int]::TryParse((Read-Host 'Please enter the correct year you wish to archive in (YYYY) format'), [ref]$ArchiveYear)
+            $YearInputSize = ([string]$ArchiveYear).length
+            if (-not $YearInputValid)
+        
+            {
+                Write-Host -BackgroundColor Red -ForegroundColor White "Input not a number"
+            }
+            elseif ($YearInputSize -ne 4)
+            {
+                Write-Host -BackgroundColor Red -ForegroundColor White "Input is not 4 digits"
+            }
+        } while ((-not $YearInputValid) -or ($YearInputSize -ne 4))
+        $CorrectAnswer = Read-Host "Is " $ArchiveYear " the correct year?"
+    } until ($CorrectAnswer -ieq "yes")
+    
+    if ($CorrectAnswer -ieq "yes")
+    {
+     $Year = $ArchiveYear
+     Write-Host " The year " $Year " will be now checked for archiving."
+    }    
+} 
+
+# compare year entered to last archived year and pass if valid
+$LastArchived = 0
+if ($LastArchived -le $year) 
+{    
+    do { 
+        [string]$LastArchived = $year
+        $LastArchivedNum = $LastArchived.Substring($LastArchived.Length -4, 4)
+        
+        [string]$VerifiedYear = Get-ChildItem "Archive " -directory | Select-Object FullName
+        Compare-Object ($LastArchivedNum)($VerifiedYear)
+
+    } while ($LastArchived -lt #Last Archived Year )
+}
+
+# Validate the year
+if ($YearInput -lt $LastArchived) 
+{
+    do 
+    {
+        Write-Host "The year you input was not greater then the last Archive year."
+        $YearInput = Read-Host "Please enter a valid year"
+
+    } until ($YearInput -gt $LastArchived)  
+}
+
+# If Archive $Year folder does not exist, create it
+if (! (Test-Path "Archive $Year"))
+{
+    New-Item -ItemType Directory -Force -Path "Archive $Year"
+}
+
+# Convert Year to string to filter last 2 digits
+[string]$YearNum = $Year
+$YearNum = $YearNum.Substring($YearNum.Length -2, 2)
+
+# Copy Content of Live Jobs 
+Copy-Item -Recurse -Force "Production\*"  -Filter "$YearNum*"  -Destination "Archive $Year"
+
+
+# Verify both folders exist
+if ((Test-Path -Path "Production\*") -and (Test-Path -Path "Archive $Year\*"))
+{
+    ## Both folders exist
+    Write-Host "Both directories exist"
+}
+
+# Verify Source & Destination 
+$SourceFiles = Get-ChildItem "Production\" -Filter "$YearNum*" -Recurse 
+$DestinationFiles = Get-ChildItem "Archive $Year" -Recurse 
+
+if (-not (($SourceFiles.foreach{ Get-FileHash $_.FullName }).Hash -and ($DestinationFiles.foreach{ Get-FileHash $_.FullName }).Hash))
+{
+    Write-Host "File hashes do not exist, now escapting script"
+    exit
+}
+elseif (Compare-Object $SourceFiles.Name $DestinationFiles.Name)
+{
+    ## Folders have Same Files
+    Write-Host "$Year folders & files exist in both directory"
+}
+############ Above script only says hash do not exist if destination is completely empty
+
+# Remove Unnecessary Files
+$MiscDelete = Get-ItemProperty -Recurse -Force "Archive $Year\*\MISC_DISPOSABLE"
+$DamDelete = Get-ItemPropertyValue -Recurse -Force "Archive $Year\*\DAM_xxxxxx"
+$KeylineDelete = Get-Item -Recurse -Force "Archive $Year\*\KEYLINE_CS_\_original quark-inDesign-pdf"
+$VariablesToDelete = ($MiscDelete, $DamDelete, $KeylineDelete)
+Foreach ($path in $VariablesToDelete)
+{
+    if (!(Test-Path $path -PathType leaf))
+    {
+        Remove-Item $path -Verbose -ErrorAction stop
+        Write-Host ($path + " was deleted.")
+    }
+    else
+    {
+        Write-Host ($path + " was not found.")
+    }
+    Write-Host "Files have been deleted."
+}
+
+# Force remove any remaining files & directories if above script did not properly find 
+Remove-Item -Path "Archive $Year\*\MISC_DISPOSABLE" -Force -Recurse
+Remove-Item -Path "Archive $Year\*\DAM_xxxxxx" -Recurse
+Remove-Item -Path "Archive $Year\*\KEYLINE_CS_\_original quark-inDesign-pdf" -Recurse
+Write-Host "Secondary deletion complete"
+
+
+# Remove any Folders & Files left behind
+$directoryToDelete = Get-Item "Production\*" -Filter "$YearNum*"
+$directoryToDelete
+Move-Item -Path "Production\$YearNum*" -Destination "Production\MISC_Files"
+&cmd.exe /c rd /s /q "Production\MISC_Files"
+Write-Host "Successfully migrated Live Jobs Folders & Files"
+
+# Output time elapsed during script.
+Write-Host "Script took" $StopWatch.Elapsed.Seconds "seconds to complete"
+
